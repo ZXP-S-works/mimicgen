@@ -32,7 +32,7 @@ CONFIG_DIR = "/tmp/core_configs"
 OUTPUT_FOLDER = "/tmp/core_datasets"
 
 # number of trajectories to generate (or attempt to generate)
-NUM_TRAJ = 1000
+NUM_TRAJ = 200
 
 # whether to guarantee that many successful trajectories (e.g. keep running until that many successes, or stop at that many attempts)
 GUARANTEE = True
@@ -74,8 +74,8 @@ def make_generators(base_configs):
             dataset_name="stack",
             generation_path="{}/stack".format(OUTPUT_FOLDER),
             # task_interface="MG_Stack",
-            tasks=["Stack_D0", "Stack_D1"],
-            task_names=["D0", "D1"],
+            tasks=["Stack_D0", "Stack_D1", "Stack_D3"],
+            task_names=["D0", "D1", "D3"],
             select_src_per_subtask=True,
             selection_strategy="nearest_neighbor_object",
             selection_strategy_kwargs=dict(nn_k=3),

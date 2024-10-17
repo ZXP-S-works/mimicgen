@@ -1,4 +1,4 @@
-# Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Licensed under the NVIDIA Source Code License [see LICENSE for details].
 
@@ -16,6 +16,7 @@ from robosuite.utils.placement_samplers import UniformRandomSampler
 from robosuite.utils.observables import Observable, sensor
 from robosuite.environments.manipulation.stack import Stack
 
+import scipy.spatial.transform as sst
 from mimicgen.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
 
 
@@ -23,6 +24,7 @@ class Stack_D0(Stack, SingleArmEnv_MG):
     """
     Augment robosuite stack task for mimicgen.
     """
+
     def __init__(self, **kwargs):
         assert "placement_initializer" not in kwargs, "this class defines its own placement initializer"
 
@@ -177,8 +179,8 @@ class Stack_D0(Stack, SingleArmEnv_MG):
                 z_rot: 2-tuple for low and high values for uniform sampling of z-rotation
                 reference: np array of shape (3,) for reference position in world frame (assumed to be static and not change)
         """
-        return { 
-            k : dict(
+        return {
+            k: dict(
                 x=(-0.08, 0.08),
                 y=(-0.08, 0.08),
                 z_rot=(0., 2. * np.pi),
@@ -193,6 +195,7 @@ class Stack_D1(Stack_D0):
     """
     Much wider initialization bounds.
     """
+
     def _load_arena(self):
         """
         Make default camera have full view of tabletop to account for larger init bounds.
@@ -200,9 +203,11 @@ class Stack_D1(Stack_D0):
         mujoco_arena = super()._load_arena()
 
         # Set default agentview camera to be "agentview_full" (and send old agentview camera to agentview_full)
-        old_agentview_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "agentview"}, return_first=True)
+        old_agentview_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "agentview"},
+                                             return_first=True)
         old_agentview_camera_pose = (old_agentview_camera.get("pos"), old_agentview_camera.get("quat"))
-        old_agentview_full_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "agentview_full"}, return_first=True)
+        old_agentview_full_camera = find_elements(root=mujoco_arena.worldbody, tags="camera",
+                                                  attribs={"name": "agentview_full"}, return_first=True)
         old_agentview_full_camera_pose = (old_agentview_full_camera.get("pos"), old_agentview_full_camera.get("quat"))
         mujoco_arena.set_camera(
             camera_name="agentview",
@@ -219,8 +224,8 @@ class Stack_D1(Stack_D0):
 
     def _get_initial_placement_bounds(self):
         max_dim = 0.20
-        return { 
-            k : dict(
+        return {
+            k: dict(
                 x=(-max_dim, max_dim),
                 y=(-max_dim, max_dim),
                 z_rot=(0., 2. * np.pi),
@@ -231,10 +236,184 @@ class Stack_D1(Stack_D0):
         }
 
 
+class Stack_D3(Stack_D1):
+    """
+    Augment robosuite stack task for mimicgen.
+    """
+
+    def __init__(self, **kwargs):
+        assert "placement_initializer" not in kwargs, "this class defines its own placement initializer"
+
+        bounds = self._get_initial_placement_bounds()
+
+        # # ensure cube symmetry
+        # assert len(bounds) == 2
+        # for k in ["x", "y", "rot", "reference"]:
+        #     assert np.array_equal(np.array(bounds["cubeA"][k]), np.array(bounds["cubeB"][k]))
+
+        placement_initializer = UniformRandomSampler(
+            name="ObjectSampler",
+            x_range=bounds["cubeA"]["x"],
+            y_range=bounds["cubeA"]["y"],
+            rotation=bounds["cubeA"]["rot"],
+            rotation_axis='xyz',
+            ensure_object_boundary_in_range=False,
+            ensure_valid_placement=True,
+            reference_pos=bounds["cubeA"]["reference"],
+            z_offset=0.01,
+        )
+
+        Stack.__init__(self, placement_initializer=placement_initializer, **kwargs)
+
+    def _get_initial_placement_bounds(self):
+        max_dim = 0.20
+        return {
+            "cubeA": dict(
+                x=(-max_dim, max_dim),
+                y=(-max_dim, max_dim),
+                rot=(0.1 * np.pi, 0.1 * np.pi, 2. * np.pi),
+                # NOTE: hardcoded @self.table_offset since this might be called in init function
+                reference=np.array((0, 0, 0.8)),
+            ),
+            "cubeB": dict(
+                x=(-max_dim, max_dim),
+                y=(-max_dim, max_dim),
+                rot=(0.1 * np.pi, 0.1 * np.pi, 2. * np.pi),
+                # NOTE: hardcoded @self.table_offset since this might be called in init function
+                reference=np.array((0, 0, 0.8)),
+            ),
+        }
+
+    def _load_arena(self):
+        """
+        Allow subclasses to easily override arena settings.
+        """
+
+        rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
+        rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
+        self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
+        self.table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+
+        # load model for table top workspace
+        mujoco_arena = TableArena(
+            table_full_size=self.table_full_size,
+            table_friction=self.table_friction,
+            table_offset=self.table_offset,
+            table_offset_rot=self.table_offset_rot,
+        )
+
+        # Arena always gets set to zero origin
+        mujoco_arena.set_origin([0, 0, 0])
+
+        # Add camera with full tabletop perspective
+        self._add_agentview_full_camera(mujoco_arena)
+
+        return mujoco_arena
+
+    def _load_model(self):
+        """
+        Loads an xml model, puts it in self.model
+        """
+        SingleArmEnv._load_model(self)
+
+        # Adjust base pose accordingly
+        xpos = self.robots[0].robot_model.base_xpos_offset["table"](self.table_full_size[0])
+        self.robots[0].robot_model.set_base_xpos(xpos)
+
+        # load model for table top workspace
+        mujoco_arena = self._load_arena()
+
+        # initialize objects of interest
+        tex_attrib = {
+            "type": "cube",
+        }
+        mat_attrib = {
+            "texrepeat": "1 1",
+            "specular": "0.4",
+            "shininess": "0.1",
+        }
+        redwood = CustomMaterial(
+            texture="WoodRed",
+            tex_name="redwood",
+            mat_name="redwood_mat",
+            tex_attrib=tex_attrib,
+            mat_attrib=mat_attrib,
+        )
+        greenwood = CustomMaterial(
+            texture="WoodGreen",
+            tex_name="greenwood",
+            mat_name="greenwood_mat",
+            tex_attrib=tex_attrib,
+            mat_attrib=mat_attrib,
+        )
+        # white = CustomMaterial(
+        #     texture="WoodLight",
+        #     tex_name="woodlight",
+        #     mat_name="wood_light",
+        #     tex_attrib=tex_attrib,
+        #     mat_attrib=mat_attrib,
+        # )
+        self.cubeA = BoxObject(
+            name="cubeA",
+            size_min=[0.02, 0.02, 0.02],
+            size_max=[0.02, 0.02, 0.02],
+            rgba=[1, 0, 0, 1],
+            material=redwood,
+        )
+        # self.coasterA = BoxObject(
+        #     name="coasterA",
+        #     size_min=[0.05, 0.05, 0.005],
+        #     size_max=[0.05, 0.05, 0.005],
+        #     rgba=[1, 1, 1, 1],
+        #     material=white,
+        # )
+        self.cubeB = BoxObject(
+            name="cubeB",
+            size_min=[0.025, 0.025, 0.025],
+            size_max=[0.025, 0.025, 0.025],
+            rgba=[0, 1, 0, 1],
+            material=greenwood,
+        )
+        # self.coasterB = BoxObject(
+        #     name="coasterB",
+        #     size_min=[0.05, 0.05, 0.005],
+        #     size_max=[0.05, 0.05, 0.005],
+        #     rgba=[1, 1, 1, 1],
+        #     material=white,
+        # )
+        # cubes = [self.cubeA, self.cubeB, self.coasterA, self.coasterB]
+        cubes = [self.cubeA, self.cubeB]
+        # Create placement initializer
+        if self.placement_initializer is not None:
+            self.placement_initializer.reset()
+            self.placement_initializer.add_objects(cubes)
+        else:
+            self.placement_initializer = UniformRandomSampler(
+                name="ObjectSampler",
+                mujoco_objects=cubes,
+                x_range=[-0.08, 0.08],
+                y_range=[-0.08, 0.08],
+                rotation=None,
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            )
+
+        # task includes arena, robot, and objects of interest
+        self.model = ManipulationTask(
+            mujoco_arena=mujoco_arena,
+            mujoco_robots=[robot.robot_model for robot in self.robots],
+            mujoco_objects=cubes,
+        )
+
 class StackThree(Stack_D0):
     """
     Stack three cubes instead of two.
     """
+
     def __init__(self, **kwargs):
         assert "placement_initializer" not in kwargs, "this class defines its own placement initializer"
 
@@ -488,8 +667,8 @@ class StackThree(Stack_D0):
                 z_rot: 2-tuple for low and high values for uniform sampling of z-rotation
                 reference: np array of shape (3,) for reference position in world frame (assumed to be static and not change)
         """
-        return { 
-            k : dict(
+        return {
+            k: dict(
                 x=(-0.10, 0.10),
                 y=(-0.10, 0.10),
                 z_rot=(0., 2. * np.pi),
@@ -509,6 +688,7 @@ class StackThree_D1(StackThree_D0):
     """
     Less z-rotation (for easier datagen) and much wider initialization bounds.
     """
+
     def _load_arena(self):
         """
         Make default camera have full view of tabletop to account for larger init bounds.
@@ -516,9 +696,11 @@ class StackThree_D1(StackThree_D0):
         mujoco_arena = super()._load_arena()
 
         # Set default agentview camera to be "agentview_full" (and send old agentview camera to agentview_full)
-        old_agentview_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "agentview"}, return_first=True)
+        old_agentview_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "agentview"},
+                                             return_first=True)
         old_agentview_camera_pose = (old_agentview_camera.get("pos"), old_agentview_camera.get("quat"))
-        old_agentview_full_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "agentview_full"}, return_first=True)
+        old_agentview_full_camera = find_elements(root=mujoco_arena.worldbody, tags="camera",
+                                                  attribs={"name": "agentview_full"}, return_first=True)
         old_agentview_full_camera_pose = (old_agentview_full_camera.get("pos"), old_agentview_full_camera.get("quat"))
         mujoco_arena.set_camera(
             camera_name="agentview",
@@ -535,8 +717,8 @@ class StackThree_D1(StackThree_D0):
 
     def _get_initial_placement_bounds(self):
         max_dim = 0.20
-        return { 
-            k : dict(
+        return {
+            k: dict(
                 x=(-max_dim, max_dim),
                 y=(-max_dim, max_dim),
                 z_rot=(0., 2. * np.pi),
