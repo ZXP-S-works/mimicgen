@@ -16,6 +16,7 @@ from robosuite.utils.placement_samplers import UniformRandomSampler
 from robosuite.utils.observables import Observable, sensor
 from robosuite.environments.manipulation.stack import Stack
 
+import scipy.spatial.transform as sst
 from mimicgen_envs.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
 
 
@@ -245,10 +246,17 @@ class Stack_D3(Stack_D1):
 
         bounds = self._get_initial_placement_bounds()
 
-        # ensure cube symmetry
-        assert len(bounds) == 2
-        for k in ["x", "y", "rot", "reference"]:
-            assert np.array_equal(np.array(bounds["cubeA"][k]), np.array(bounds["cubeB"][k]))
+        rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
+        rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
+        self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
+        self.table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+
+        # # ensure cube symmetry
+        # assert len(bounds) == 2
+        # for k in ["x", "y", "rot", "reference"]:
+        #     assert np.array_equal(np.array(bounds["cubeA"][k]), np.array(bounds["cubeB"][k]))
 
         placement_initializer = UniformRandomSampler(
             name="ObjectSampler",
@@ -283,6 +291,123 @@ class Stack_D3(Stack_D1):
             ),
         }
 
+    def _load_arena(self):
+        """
+        Allow subclasses to easily override arena settings.
+        """
+
+        # load model for table top workspace
+        mujoco_arena = TableArena(
+            table_full_size=self.table_full_size,
+            table_friction=self.table_friction,
+            table_offset=self.table_offset,
+            table_offset_rot=self.table_offset_rot,
+        )
+
+        # Arena always gets set to zero origin
+        mujoco_arena.set_origin([0, 0, 0])
+
+        # Add camera with full tabletop perspective
+        self._add_agentview_full_camera(mujoco_arena)
+
+        return mujoco_arena
+
+    def _load_model(self):
+        """
+        Loads an xml model, puts it in self.model
+        """
+        SingleArmEnv._load_model(self)
+
+        # Adjust base pose accordingly
+        xpos = self.robots[0].robot_model.base_xpos_offset["table"](self.table_full_size[0])
+        self.robots[0].robot_model.set_base_xpos(xpos)
+
+        # load model for table top workspace
+        mujoco_arena = self._load_arena()
+
+        # initialize objects of interest
+        tex_attrib = {
+            "type": "cube",
+        }
+        mat_attrib = {
+            "texrepeat": "1 1",
+            "specular": "0.4",
+            "shininess": "0.1",
+        }
+        redwood = CustomMaterial(
+            texture="WoodRed",
+            tex_name="redwood",
+            mat_name="redwood_mat",
+            tex_attrib=tex_attrib,
+            mat_attrib=mat_attrib,
+        )
+        greenwood = CustomMaterial(
+            texture="WoodGreen",
+            tex_name="greenwood",
+            mat_name="greenwood_mat",
+            tex_attrib=tex_attrib,
+            mat_attrib=mat_attrib,
+        )
+        # white = CustomMaterial(
+        #     texture="WoodLight",
+        #     tex_name="woodlight",
+        #     mat_name="wood_light",
+        #     tex_attrib=tex_attrib,
+        #     mat_attrib=mat_attrib,
+        # )
+        self.cubeA = BoxObject(
+            name="cubeA",
+            size_min=[0.02, 0.02, 0.02],
+            size_max=[0.02, 0.02, 0.02],
+            rgba=[1, 0, 0, 1],
+            material=redwood,
+        )
+        # self.coasterA = BoxObject(
+        #     name="coasterA",
+        #     size_min=[0.05, 0.05, 0.005],
+        #     size_max=[0.05, 0.05, 0.005],
+        #     rgba=[1, 1, 1, 1],
+        #     material=white,
+        # )
+        self.cubeB = BoxObject(
+            name="cubeB",
+            size_min=[0.025, 0.025, 0.025],
+            size_max=[0.025, 0.025, 0.025],
+            rgba=[0, 1, 0, 1],
+            material=greenwood,
+        )
+        # self.coasterB = BoxObject(
+        #     name="coasterB",
+        #     size_min=[0.05, 0.05, 0.005],
+        #     size_max=[0.05, 0.05, 0.005],
+        #     rgba=[1, 1, 1, 1],
+        #     material=white,
+        # )
+        # cubes = [self.cubeA, self.cubeB, self.coasterA, self.coasterB]
+        cubes = [self.cubeA, self.cubeB]
+        # Create placement initializer
+        if self.placement_initializer is not None:
+            self.placement_initializer.reset()
+            self.placement_initializer.add_objects(cubes)
+        else:
+            self.placement_initializer = UniformRandomSampler(
+                name="ObjectSampler",
+                mujoco_objects=cubes,
+                x_range=[-0.08, 0.08],
+                y_range=[-0.08, 0.08],
+                rotation=None,
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            )
+
+        # task includes arena, robot, and objects of interest
+        self.model = ManipulationTask(
+            mujoco_arena=mujoco_arena,
+            mujoco_robots=[robot.robot_model for robot in self.robots],
+            mujoco_objects=cubes,
+        )
 
 class StackThree(Stack_D0):
     """
