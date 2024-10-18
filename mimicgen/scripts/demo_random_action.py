@@ -86,6 +86,6 @@ if __name__ == "__main__":
 
     # do visualization
     for i in range(10000):
+        env.render()
         action = np.random.uniform(low, high)
         obs, reward, done, _ = env.step(action)
-        env.render()
