@@ -294,23 +294,29 @@ class Stack_D3(Stack_D1):
         rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
         rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
         self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
-        self.table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+        table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
 
         # load model for table top workspace
-        mujoco_arena = TableArena(
+        self.mujoco_arena = TableArena(
             table_full_size=self.table_full_size,
             table_friction=self.table_friction,
             table_offset=self.table_offset,
-            table_offset_rot=self.table_offset_rot,
+            table_offset_rot=table_offset_rot,
         )
 
         # Arena always gets set to zero origin
-        mujoco_arena.set_origin([0, 0, 0])
+        self.mujoco_arena.set_origin([0, 0, 0])
 
         # Add camera with full tabletop perspective
-        self._add_agentview_full_camera(mujoco_arena)
+        self._add_agentview_full_camera(self.mujoco_arena)
 
-        return mujoco_arena
+        return self.mujoco_arena
+
+    def get_table_offset_rotmat(self):
+        tableID = self.sim.model.body_name2id('table')
+        quat = self.sim.data.body_xquat[tableID]
+        quat = np.concatenate([quat[1:], quat[:1]])  # xyzw
+        return sst.Rotation.from_quat(quat).as_matrix()
 
     def _load_model(self):
         """
