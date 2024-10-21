@@ -17,9 +17,11 @@ from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.placement_samplers import SequentialCompositeSampler, UniformRandomSampler
 from robosuite.utils.observables import Observable, sensor
 
+import scipy.spatial.transform as sst
 import mimicgen
 from mimicgen.models.robosuite.objects import BlenderObject, CoffeeMachinePodObject, CoffeeMachineObject, LongDrawerObject, CupObject
 from mimicgen.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
+from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler
 
 
 class Coffee(SingleArmEnv_MG):
@@ -839,6 +841,115 @@ class Coffee_D2(Coffee_D1):
                 reference=self.table_offset,
             ),
         )
+
+
+class Coffee_D3(Coffee_D2):
+    def _get_placement_initializer(self):
+        bounds = self._get_initial_placement_bounds()
+
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        self.placement_initializer.append_sampler(
+            sampler=TiledTableRandomSampler(
+                name="CoffeeMachineSampler",
+                mujoco_objects=self.coffee_machine,
+                x_range=bounds["coffee_machine"]["x"],
+                y_range=bounds["coffee_machine"]["y"],
+                rotation=bounds["coffee_machine"]["z_rot"],
+                rotation_axis='z',
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=bounds["coffee_machine"]["reference"],
+                rotmat=self.table_offset_rotmat
+            )
+        )
+        self.placement_initializer.append_sampler(
+            sampler=TiledTableRandomSampler(
+                name="CoffeePodSampler",
+                mujoco_objects=self.coffee_pod,
+                x_range=bounds["coffee_pod"]["x"],
+                y_range=bounds["coffee_pod"]["y"],
+                rotation=bounds["coffee_pod"]["z_rot"],
+                rotation_axis='z',
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=bounds["coffee_pod"]["reference"],
+                rotmat=self.table_offset_rotmat
+            )
+        )
+
+    def _get_z_offset_for_tilted_table(self, x, y):
+        rotmat = self.table_offset_rotmat
+        location = np.asarray([(x[0]+x[1])/2, (y[0]+y[1])/2, 0]).reshape(-1, 1)
+        # rough estimation
+        return (rotmat @ location)[2]
+
+    def _load_model(self):
+        """
+        Loads an xml model, puts it in self.model
+        """
+        SingleArmEnv_MG._load_model(self)
+
+        # Adjust base pose accordingly
+        xpos = self.robots[0].robot_model.base_xpos_offset["table"](self.table_full_size[0])
+        self.robots[0].robot_model.set_base_xpos(xpos)
+
+        # load model for table top workspace
+        mujoco_arena = self._load_arena()
+
+        # Arena always gets set to zero origin
+        mujoco_arena.set_origin([0, 0, 0])
+
+        # Add camera with full tabletop perspective
+        self._add_agentview_full_camera(mujoco_arena)
+
+        # initialize objects of interest
+        self.coffee_pod = CoffeeMachinePodObject(name="coffee_pod")
+        self.coffee_machine = CoffeeMachineObject(name="coffee_machine")
+        objects = [self.coffee_pod, self.coffee_machine]
+
+        # Create placement initializer
+        self._get_placement_initializer()
+
+        # task includes arena, robot, and objects of interest
+        self.model = ManipulationTask(
+            mujoco_arena=mujoco_arena,
+            mujoco_robots=[robot.robot_model for robot in self.robots],
+            mujoco_objects=objects,
+        )
+
+    def _load_arena(self):
+        """
+        Allow subclasses to easily override arena settings.
+        """
+
+        rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
+        rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
+        self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
+        table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+
+        # load model for table top workspace
+        self.mujoco_arena = TableArena(
+            table_full_size=self.table_full_size,
+            table_friction=self.table_friction,
+            table_offset=self.table_offset,
+            table_offset_rot=table_offset_rot,
+        )
+
+        # Arena always gets set to zero origin
+        self.mujoco_arena.set_origin([0, 0, 0])
+
+        # Add camera with full tabletop perspective
+        self._add_agentview_full_camera(self.mujoco_arena)
+
+        return self.mujoco_arena
+
+    def get_table_offset_rotmat(self):
+        tableID = self.sim.model.body_name2id('table')
+        quat = self.sim.data.body_xquat[tableID]
+        quat = np.concatenate([quat[1:], quat[:1]])  # xyzw
+        return sst.Rotation.from_quat(quat).as_matrix()
 
 
 class CoffeePreparation(Coffee):

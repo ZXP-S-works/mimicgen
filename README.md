@@ -55,3 +55,6 @@ Please cite [the MimicGen paper](https://arxiv.org/abs/2310.17596) if you use th
     year={2023}
 }
 ```
+
+## Notes
+https://mimicgen.github.io/docs/tutorials/reproducing_experiments.html
