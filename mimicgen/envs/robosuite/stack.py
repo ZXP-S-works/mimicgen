@@ -79,6 +79,8 @@ class Stack_D0(Stack, SingleArmEnv_MG):
         """
 
         # load model for table top workspace
+        print(self.table_full_size)
+        # self.table_full_size = (0.1,0.1,0.05)
         mujoco_arena = TableArena(
             table_full_size=self.table_full_size,
             table_friction=self.table_friction,
@@ -129,6 +131,16 @@ class Stack_D0(Stack, SingleArmEnv_MG):
             tex_attrib=tex_attrib,
             mat_attrib=mat_attrib,
         )
+
+        lightwood = CustomMaterial(
+            texture="WoodLight",
+            tex_name="lightwood",
+            mat_name="lightwood_mat",
+            tex_attrib=tex_attrib,
+            mat_attrib=mat_attrib,
+        )
+
+
         self.cubeA = BoxObject(
             name="cubeA",
             size_min=[0.02, 0.02, 0.02],
@@ -143,12 +155,41 @@ class Stack_D0(Stack, SingleArmEnv_MG):
             rgba=[0, 1, 0, 1],
             material=greenwood,
         )
-        cubes = [self.cubeA, self.cubeB]
+
+        self.cubec = BoxObject(
+            name="cubec",
+            size_min=[0.03, 0.03, 0.01],
+            size_max=[0.03, 0.03, 0.01],
+            rgba=[0, 0, 1, 1],
+            material=lightwood,
+            # joints= None,
+
+        )
+
+        self.cubed = BoxObject(
+            name="cubed",
+            size_min=[0.03, 0.03, 0.01],
+            size_max=[0.03, 0.03, 0.01],
+            rgba=[0, 0, 1, 1],
+            material=lightwood,
+            # joints= None,
+
+        )
+        # from robosuite.utils.mjcf_utils import array_to_string
+
+        # self.cubec.get_obj().set("pos", array_to_string(np.array([0.5, 0.5 ,0.1])))
+        
+
+        cubes = [self.cubeA, self.cubeB, self.cubec, self.cubed]
+
         # Create placement initializer
+        # print(self.placement_initializer,'++++')
         if self.placement_initializer is not None:
             self.placement_initializer.reset()
             self.placement_initializer.add_objects(cubes)
+            # print(111,'++++++')
         else:
+            # print('0000========================')
             self.placement_initializer = UniformRandomSampler(
                 name="ObjectSampler",
                 mujoco_objects=cubes,
@@ -160,13 +201,17 @@ class Stack_D0(Stack, SingleArmEnv_MG):
                 reference_pos=self.table_offset,
                 z_offset=0.01,
             )
-
+        
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
             mujoco_objects=cubes,
         )
+
+        # tableID = self.sim.model.body_name2id('table')
+        # quat = self.sim.data.body_xquat[tableID]
+        # print(quat)
 
     def _get_initial_placement_bounds(self):
         """

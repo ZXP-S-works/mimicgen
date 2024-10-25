@@ -6,6 +6,8 @@
 Script that offers an easy way to test random actions in a MimicGen environment.
 Similar to the demo_random_action.py script from robosuite.
 """
+import sys
+# sys.path.append('/home/ANT.AMAZON.COM/haojieh/Documents/step_simulator/robosuite')
 from robosuite.controllers import load_controller_config
 from robosuite.utils.input_utils import *
 
@@ -65,6 +67,9 @@ if __name__ == "__main__":
 
     # Choose robot
     options["robots"] = choose_robots(exclude_bimanual=True)
+    
+    # print(options)
+    # options = {'env_name': 'Stack_D0', 'robots': 'Panda'}
 
     # Load the desired controller
     options["controller_configs"] = load_controller_config(default_controller="OSC_POSE")
@@ -91,3 +96,13 @@ if __name__ == "__main__":
             env.render()
             action = np.random.uniform(low, high)
             obs, reward, done, _ = env.step(action)
+            ###
+            tableID = env.sim.model.body_name2id('table')
+            quat = env.sim.data.body_xquat[tableID]
+            # print(quat)
+            # cubeaid = env.sim.model.body_name2id('cubeA_main')
+            # print(cubeaid,'---')
+            # jt = env.get_joint_qpos_addr('cubeA_main')
+            # jt = env.sim.model.jnt_type(cubeaid)
+            # get_joint_qpos_addr
+            # print(jt)
