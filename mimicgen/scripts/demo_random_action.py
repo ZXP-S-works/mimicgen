@@ -69,19 +69,21 @@ if __name__ == "__main__":
     # Load the desired controller
     options["controller_configs"] = load_controller_config(default_controller="OSC_POSE")
 
+    # initialize the task
+    env = suite.make(
+        **options,
+        has_renderer=True,
+        has_offscreen_renderer=False,
+        ignore_done=True,
+        use_camera_obs=False,
+        control_freq=20,
+    )
+
     # do visualization
     for i in range(100):
-
-        # initialize the task
-        env = suite.make(
-            **options,
-            has_renderer=True,
-            has_offscreen_renderer=False,
-            ignore_done=True,
-            use_camera_obs=False,
-            control_freq=20,
-        )
+        # np.random.seed(i%2)
         env.reset()
+        # env._reset_internal()
         env.viewer.set_camera(camera_id=0)
 
         # Get action limits

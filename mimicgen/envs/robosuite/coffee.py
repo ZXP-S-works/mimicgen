@@ -877,12 +877,6 @@ class Coffee_D3(Coffee_D2):
             )
         )
 
-    def _get_z_offset_for_tilted_table(self, x, y):
-        rotmat = self.table_offset_rotmat
-        location = np.asarray([(x[0]+x[1])/2, (y[0]+y[1])/2, 0]).reshape(-1, 1)
-        # rough estimation
-        return (rotmat @ location)[2]
-
     def _load_model(self):
         """
         Loads an xml model, puts it in self.model
@@ -917,24 +911,28 @@ class Coffee_D3(Coffee_D2):
             mujoco_objects=objects,
         )
 
-    def _load_arena(self):
-        """
-        Allow subclasses to easily override arena settings.
-        """
-
+    def _initial_rand_table_rot(self):
         rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
         rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
         rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
         rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
         self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
-        table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+        self.table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+
+    def _load_arena(self):
+        """
+        Allow subclasses to easily override arena settings.
+        """
+        self._initial_rand_table_rot()
 
         # load model for table top workspace
+        # ToDo: currently I cannot restore the table state from training data,
+        #  in future, consider treating the state as a joint
         self.mujoco_arena = TableArena(
             table_full_size=self.table_full_size,
             table_friction=self.table_friction,
             table_offset=self.table_offset,
-            table_offset_rot=table_offset_rot,
+            table_offset_rot=self.table_offset_rot,
         )
 
         # Arena always gets set to zero origin
@@ -944,6 +942,30 @@ class Coffee_D3(Coffee_D2):
         self._add_agentview_full_camera(self.mujoco_arena)
 
         return self.mujoco_arena
+
+    def _reset_internal(self):
+        """
+        Resets simulation internal configurations.
+        """
+        SingleArmEnv_MG._reset_internal(self)
+
+        # Reset all object positions using initializer sampler if we're not directly loading from an xml
+        if not self.deterministic_reset:
+            # # reload the table
+            # self._initial_rand_table_rot()
+            # self.mujoco_arena.table_offset_rot = self.table_offset_rot
+            # self.mujoco_arena.configure_location()
+
+            # Sample from the placement initializer for all objects
+            object_placements = self.placement_initializer.sample()
+
+            # Loop through all objects and reset their positions
+            for obj_pos, obj_quat, obj in object_placements.values():
+                self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+
+        # Always reset the hinge joint position
+        self.sim.data.qpos[self.hinge_qpos_addr] = 2. * np.pi / 3.
+        self.sim.forward()
 
     def get_table_offset_rotmat(self):
         tableID = self.sim.model.body_name2id('table')
