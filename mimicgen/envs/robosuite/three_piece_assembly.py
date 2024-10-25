@@ -16,8 +16,10 @@ from robosuite.utils.placement_samplers import SequentialCompositeSampler, Unifo
 from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.mjcf_utils import CustomMaterial, find_elements, string_to_array
 
+import scipy.spatial.transform as sst
 from mimicgen.models.robosuite.objects import BoxPatternObject
 from mimicgen.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
+from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler
 
 
 class ThreePieceAssembly(SingleArmEnv_MG):
@@ -918,3 +920,89 @@ class ThreePieceAssembly_D2(ThreePieceAssembly_D1):
                 reference=self.table_offset,
             ),
         )
+
+class ThreePieceAssembly_D3(ThreePieceAssembly_D2):
+
+    def _get_placement_initializer(self):
+        bounds = self._get_initial_placement_bounds()
+
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        self.placement_initializer.append_sampler(
+            sampler=TiledTableRandomSampler(
+                name="BaseSampler",
+                mujoco_objects=self.base,
+                x_range=bounds["base"]["x"],
+                y_range=bounds["base"]["y"],
+                rotation=bounds["base"]["z_rot"],
+                rotation_axis='z',
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=bounds["base"]["reference"],
+                z_offset=0.001,
+                rotmat=self.get_table_offset_rotmat
+            )
+        )
+        self.placement_initializer.append_sampler(
+            sampler=TiledTableRandomSampler(
+                name="Piece1Sampler",
+                mujoco_objects=self.piece_1,
+                x_range=bounds["piece_1"]["x"],
+                y_range=bounds["piece_1"]["y"],
+                rotation=bounds["piece_1"]["z_rot"],
+                rotation_axis='z',
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=bounds["piece_1"]["reference"],
+                z_offset=0.001,
+                rotmat=self.get_table_offset_rotmat
+            )
+        )
+        self.placement_initializer.append_sampler(
+            sampler=TiledTableRandomSampler(
+                name="Piece2Sampler",
+                mujoco_objects=self.piece_2,
+                x_range=bounds["piece_2"]["x"],
+                y_range=bounds["piece_2"]["y"],
+                rotation=bounds["piece_2"]["z_rot"],
+                rotation_axis='z',
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=bounds["piece_2"]["reference"],
+                z_offset=0.001,
+                rotmat=self.get_table_offset_rotmat
+            )
+        )
+
+    def _initial_rand_table_rot(self):
+        rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
+        rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
+        self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
+        self.table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+
+    def _reset_internal(self):
+        """
+        Resets simulation internal configurations.
+        """
+        SingleArmEnv_MG._reset_internal(self)
+
+        # Reset all object positions using initializer sampler if we're not directly loading from an xml
+        if not self.deterministic_reset:
+            # # reload the table
+            self._initial_rand_table_rot()
+            tableID = self.sim.model.body_name2id('table')
+            quat = self.table_offset_rot.as_quat()
+            quat = np.concatenate([quat[3:], quat[:3]])  # wxyz
+            self.sim.model.body_quat[tableID] = quat
+
+            # Sample from the placement initializer for all objects
+            object_placements = self.placement_initializer.sample()
+
+            # Loop through all objects and reset their positions
+            for obj_pos, obj_quat, obj in object_placements.values():
+                self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+
+    def get_table_offset_rotmat(self):
+        return self.table_offset_rotmat
+
