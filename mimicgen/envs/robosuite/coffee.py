@@ -859,7 +859,7 @@ class Coffee_D3(Coffee_D2):
                 ensure_object_boundary_in_range=False,
                 ensure_valid_placement=True,
                 reference_pos=bounds["coffee_machine"]["reference"],
-                rotmat=self.table_offset_rotmat
+                rotmat=self.get_table_offset_rotmat
             )
         )
         self.placement_initializer.append_sampler(
@@ -873,7 +873,7 @@ class Coffee_D3(Coffee_D2):
                 ensure_object_boundary_in_range=False,
                 ensure_valid_placement=True,
                 reference_pos=bounds["coffee_pod"]["reference"],
-                rotmat=self.table_offset_rotmat
+                rotmat=self.get_table_offset_rotmat
             )
         )
 
@@ -952,9 +952,11 @@ class Coffee_D3(Coffee_D2):
         # Reset all object positions using initializer sampler if we're not directly loading from an xml
         if not self.deterministic_reset:
             # # reload the table
-            # self._initial_rand_table_rot()
-            # self.mujoco_arena.table_offset_rot = self.table_offset_rot
-            # self.mujoco_arena.configure_location()
+            self._initial_rand_table_rot()
+            tableID = self.sim.model.body_name2id('table')
+            quat = self.table_offset_rot.as_quat()
+            quat = np.concatenate([quat[3:], quat[:3]])  # wxyz
+            self.sim.model.body_quat[tableID] = quat
 
             # Sample from the placement initializer for all objects
             object_placements = self.placement_initializer.sample()
@@ -968,10 +970,12 @@ class Coffee_D3(Coffee_D2):
         self.sim.forward()
 
     def get_table_offset_rotmat(self):
-        tableID = self.sim.model.body_name2id('table')
-        quat = self.sim.data.body_xquat[tableID]
-        quat = np.concatenate([quat[1:], quat[:1]])  # xyzw
-        return sst.Rotation.from_quat(quat).as_matrix()
+        # tableID = self.sim.model.body_name2id('table')
+        # quat = self.sim.data.body_xquat[tableID]
+        # quat = self.sim.data.body_xquat[tableID]
+        # quat = np.concatenate([quat[1:], quat[:1]])  # xyzw
+        # return sst.Rotation.from_quat(quat).as_matrix()
+        return self.table_offset_rotmat
 
 
 class CoffeePreparation(Coffee):

@@ -82,8 +82,8 @@ if __name__ == "__main__":
     # do visualization
     for i in range(100):
         # np.random.seed(i%2)
-        env.reset()
-        # env._reset_internal()
+        # env.reset()
+        env._reset_internal()
         env.viewer.set_camera(camera_id=0)
 
         # Get action limits

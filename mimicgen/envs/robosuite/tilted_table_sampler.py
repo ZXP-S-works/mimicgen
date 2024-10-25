@@ -148,11 +148,11 @@ class TiledTableRandomSampler(UniformRandomSampler):
                         # qquat = sst.Rotation.from_matrix(self.rotmat).as_quat()
                         quat = np.concatenate([quat[1:], quat[:1]])
                         obj_rotmat = sst.Rotation.from_quat(quat).as_matrix()
-                        obj_rotmat = self.rotmat @ obj_rotmat
+                        obj_rotmat = self.rotmat() @ obj_rotmat
                         quat = sst.Rotation.from_matrix(obj_rotmat).as_quat()
                         quat = np.concatenate([quat[3:], quat[:3]])
                         pos = np.array([object_x, object_y, object_z]) - self.reference_pos
-                        pos = (self.rotmat @ pos.reshape(-1, 1)).reshape(-1) + self.reference_pos
+                        pos = (self.rotmat() @ pos.reshape(-1, 1)).reshape(-1) + self.reference_pos
                         pos = (pos[0], pos[1], pos[2])
                     else:
                         pos = (object_x, object_y, object_z)
