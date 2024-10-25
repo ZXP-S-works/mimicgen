@@ -18,6 +18,7 @@ from robosuite.environments.manipulation.stack import Stack
 
 import scipy.spatial.transform as sst
 from mimicgen.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
+from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler
 
 
 class Stack_D0(Stack, SingleArmEnv_MG):
@@ -246,62 +247,47 @@ class Stack_D3(Stack_D1):
 
         bounds = self._get_initial_placement_bounds()
 
-        # # ensure cube symmetry
-        # assert len(bounds) == 2
-        # for k in ["x", "y", "rot", "reference"]:
-        #     assert np.array_equal(np.array(bounds["cubeA"][k]), np.array(bounds["cubeB"][k]))
+        # ensure cube symmetry
+        assert len(bounds) == 2
+        for k in ["x", "y", "z_rot", "reference"]:
+            assert np.array_equal(np.array(bounds["cubeA"][k]), np.array(bounds["cubeB"][k]))
 
-        placement_initializer = UniformRandomSampler(
+        placement_initializer = TiledTableRandomSampler(
             name="ObjectSampler",
             x_range=bounds["cubeA"]["x"],
             y_range=bounds["cubeA"]["y"],
-            rotation=bounds["cubeA"]["rot"],
-            rotation_axis='xyz',
+            rotation=bounds["cubeA"]["z_rot"],
+            rotation_axis='z',
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=True,
             reference_pos=bounds["cubeA"]["reference"],
-            z_offset=0.01,
+            rotmat=self.get_table_offset_rotmat
         )
 
         Stack.__init__(self, placement_initializer=placement_initializer, **kwargs)
 
-    def _get_initial_placement_bounds(self):
-        max_dim = 0.20
-        return {
-            "cubeA": dict(
-                x=(-max_dim, max_dim),
-                y=(-max_dim, max_dim),
-                rot=(0.1 * np.pi, 0.1 * np.pi, 2. * np.pi),
-                # NOTE: hardcoded @self.table_offset since this might be called in init function
-                reference=np.array((0, 0, 0.8)),
-            ),
-            "cubeB": dict(
-                x=(-max_dim, max_dim),
-                y=(-max_dim, max_dim),
-                rot=(0.1 * np.pi, 0.1 * np.pi, 2. * np.pi),
-                # NOTE: hardcoded @self.table_offset since this might be called in init function
-                reference=np.array((0, 0, 0.8)),
-            ),
-        }
-
-    def _load_arena(self):
-        """
-        Allow subclasses to easily override arena settings.
-        """
-
+    def _initial_rand_table_rot(self):
         rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
         rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
         rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
         rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
         self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
-        table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+        self.table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+
+    def _load_arena(self):
+        """
+        Allow subclasses to easily override arena settings.
+        """
+        self._initial_rand_table_rot()
 
         # load model for table top workspace
+        # ToDo: currently I cannot restore the table state from training data,
+        #  in future, consider treating the state as a joint
         self.mujoco_arena = TableArena(
             table_full_size=self.table_full_size,
             table_friction=self.table_friction,
             table_offset=self.table_offset,
-            table_offset_rot=table_offset_rot,
+            table_offset_rot=self.table_offset_rot,
         )
 
         # Arena always gets set to zero origin
@@ -312,11 +298,34 @@ class Stack_D3(Stack_D1):
 
         return self.mujoco_arena
 
+    def _reset_internal(self):
+        """
+        Resets simulation internal configurations.
+        """
+        SingleArmEnv_MG._reset_internal(self)
+
+        # Reset all object positions using initializer sampler if we're not directly loading from an xml
+        if not self.deterministic_reset:
+            # # reload the table
+            self._initial_rand_table_rot()
+            tableID = self.sim.model.body_name2id('table')
+            quat = self.table_offset_rot.as_quat()
+            quat = np.concatenate([quat[3:], quat[:3]])  # wxyz
+            self.sim.model.body_quat[tableID] = quat
+
+            # Sample from the placement initializer for all objects
+            object_placements = self.placement_initializer.sample()
+
+            # Loop through all objects and reset their positions
+            for obj_pos, obj_quat, obj in object_placements.values():
+                self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+
+        # # Always reset the hinge joint position
+        # self.sim.data.qpos[self.hinge_qpos_addr] = 2. * np.pi / 3.
+        # self.sim.forward()
+
     def get_table_offset_rotmat(self):
-        tableID = self.sim.model.body_name2id('table')
-        quat = self.sim.data.body_xquat[tableID]
-        quat = np.concatenate([quat[1:], quat[:1]])  # xyzw
-        return sst.Rotation.from_quat(quat).as_matrix()
+        return self.table_offset_rotmat
 
     def _load_model(self):
         """
