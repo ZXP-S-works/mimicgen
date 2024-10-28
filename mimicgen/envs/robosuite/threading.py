@@ -16,7 +16,7 @@ from robosuite.utils.observables import Observable, sensor
 import scipy.spatial.transform as sst
 from mimicgen.models.robosuite.objects import NeedleObject, RingTripodObject
 from mimicgen.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
-from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler
+from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler, MAX_TILT
 
 
 class Threading(SingleArmEnv_MG):
@@ -614,7 +614,7 @@ class Threading_D3(Threading_D2):
 
 
     def _initial_rand_table_rot(self):
-        rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = np.asarray([MAX_TILT / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
         rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
         rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
         rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()

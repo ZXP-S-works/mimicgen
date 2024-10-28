@@ -16,7 +16,9 @@ from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.mjcf_utils import array_to_string, string_to_array, find_elements
 from robosuite.utils import RandomizationError
 
+import scipy.spatial.transform as sst
 from mimicgen.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
+from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler, MAX_TILT
 
 
 class NutAssembly_D0(NutAssembly, SingleArmEnv_MG):
@@ -389,3 +391,139 @@ class Square_D2(Square_D1):
                 reference=np.array((0, 0, 0.82)),
             ),
         )
+
+class Square_D3(Square_D2):
+    def __init__(self, **kwargs):
+        assert "placement_initializer" not in kwargs, "this class defines its own placement initializer"
+
+        # make placement initializer here
+        nut_names = ("SquareNut", "RoundNut")
+
+        # note: makes round nut init somewhere far off the table
+        round_nut_far_init = (-1.1, -1.0)
+
+        bounds = self._get_initial_placement_bounds()
+        nut_x_ranges = (bounds["nut"]["x"], bounds["nut"]["x"])
+        nut_y_ranges = (bounds["nut"]["y"], round_nut_far_init)
+        nut_z_ranges = (bounds["nut"]["z_rot"], bounds["nut"]["z_rot"])
+        nut_references = (bounds["nut"]["reference"], bounds["nut"]["reference"])
+        self.ref = np.asarray([0, 0, 0.8])
+        self.pos_buffer = {}
+
+        placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        for nut_name, x_range, y_range, z_range, ref in zip(nut_names, nut_x_ranges, nut_y_ranges, nut_z_ranges, nut_references):
+            placement_initializer.append_sampler(
+                sampler=TiledTableRandomSampler(
+                    name=f"{nut_name}Sampler",
+                    x_range=x_range,
+                    y_range=y_range,
+                    rotation=z_range,
+                    rotation_axis='z',
+                    ensure_object_boundary_in_range=False,
+                    ensure_valid_placement=True,
+                    reference_pos=ref,
+                    z_offset=0.02,
+                    rotmat=self.get_table_offset_rotmat
+                )
+            )
+
+        NutAssemblySquare.__init__(self, placement_initializer=placement_initializer, **kwargs)
+
+    def _initial_rand_table_rot(self):
+        rand_tilt = np.asarray([MAX_TILT / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
+        rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
+        self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
+        self.table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)
+
+
+    def _reset_internal(self):
+        """
+        Modify from superclass to keep sampling nut locations until there's no collision with either peg.
+        """
+        SingleArmEnv._reset_internal(self)
+
+        # Reset all object positions using initializer sampler if we're not directly loading from an xml
+        if not self.deterministic_reset:
+
+            success = False
+            for _ in range(5000): # 5000 retries
+                # # reload the table
+                self._initial_rand_table_rot()
+                quat = self.table_offset_rot.as_quat()
+                quat = np.concatenate([quat[3:], quat[:3]])  # wxyz
+                objID = self.sim.model.body_name2id('table')
+                self.sim.model.body_quat[objID] = quat
+                for obj in ['peg1', 'peg2']:
+                    objID = self.sim.model.body_name2id(obj)
+                    self.sim.model.body_quat[objID] = quat
+                    if not obj in self.pos_buffer.keys():
+                        self.pos_buffer[obj] = np.array(self.sim.model.body_pos[objID])
+                    pos = self.pos_buffer[obj].copy() - self.ref
+                    self.sim.model.body_pos[objID] = ((self.table_offset_rotmat @ pos.reshape(-1, 1)).reshape(-1)
+                                                      + self.ref)
+
+                # Sample from the placement initializer for all objects
+                object_placements = self.placement_initializer.sample()
+
+                # ADDED: check collision with pegs and maybe re-sample
+                location_valid = True
+                for obj_pos, obj_quat, obj in object_placements.values():
+                    horizontal_radius = obj.horizontal_radius
+
+                    peg1_id = self.sim.model.body_name2id("peg1")
+                    peg1_pos = np.array(self.sim.data.body_xpos[peg1_id])
+                    peg1_horizontal_radius = self.peg1_horizontal_radius
+                    if (
+                        np.linalg.norm((obj_pos[0] - peg1_pos[0], obj_pos[1] - peg1_pos[1]))
+                        <= peg1_horizontal_radius + horizontal_radius
+                    ):
+                        location_valid = False
+                        break
+
+                    peg2_id = self.sim.model.body_name2id("peg2")
+                    peg2_pos = np.array(self.sim.data.body_xpos[peg2_id])
+                    peg2_horizontal_radius = self.peg2_horizontal_radius
+                    if (
+                        np.linalg.norm((obj_pos[0] - peg2_pos[0], obj_pos[1] - peg2_pos[1]))
+                        <= peg2_horizontal_radius + horizontal_radius
+                    ):
+                        location_valid = False
+                        break
+
+                if location_valid:
+                    success = True
+                    break
+
+            if not success:
+                raise RandomizationError("Cannot place all objects ):")
+
+            # Loop through all objects and reset their positions
+            for obj_pos, obj_quat, obj in object_placements.values():
+                self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+
+        # Move objects out of the scene depending on the mode
+        nut_names = {nut.name for nut in self.nuts}
+        if self.single_object_mode == 1:
+            self.obj_to_use = random.choice(list(nut_names))
+            for nut_type, i in self.nut_to_id.items():
+                if nut_type.lower() in self.obj_to_use.lower():
+                    self.nut_id = i
+                    break
+        elif self.single_object_mode == 2:
+            self.obj_to_use = self.nuts[self.nut_id].name
+        if self.single_object_mode in {1, 2}:
+            nut_names.remove(self.obj_to_use)
+            self.clear_objects(list(nut_names))
+
+        # Make sure to update sensors' active and enabled states
+        if self.single_object_mode != 0:
+            for i, sensor_names in self.nut_id_to_sensors.items():
+                for name in sensor_names:
+                    # Set all of these sensors to be enabled and active if this is the active nut, else False
+                    self._observables[name].set_enabled(i == self.nut_id)
+                    self._observables[name].set_active(i == self.nut_id)
+
+    def get_table_offset_rotmat(self):
+        return self.table_offset_rotmat
