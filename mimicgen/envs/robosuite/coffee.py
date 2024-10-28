@@ -971,6 +971,177 @@ class Coffee_D3(Coffee_D2):
 
     def get_table_offset_rotmat(self):
         return self.table_offset_rotmat
+    
+
+
+class Coffee_D4(Coffee_D2):
+
+    def _initial_rand_table_rot1(self):
+        rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
+        rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
+        self.table_offset_rotmat1 = rand_dir @ rand_tilt @ rand_dir.T
+        self.table_offset_rot1 = sst.Rotation.from_matrix(self.table_offset_rotmat1) ##
+
+    def _initial_rand_table_rot2(self):
+        rand_tilt = np.asarray([15 / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
+        rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
+        self.table_offset_rotmat2 = rand_dir @ rand_tilt @ rand_dir.T
+        self.table_offset_rot2 = sst.Rotation.from_matrix(self.table_offset_rotmat2) ##
+
+    def get_table_offset_rotmat1(self):
+        return self.table_offset_rotmat1
+    
+    def get_table_offset_rotmat2(self):
+        return self.table_offset_rotmat2
+
+    def _load_model(self):
+        """
+        Loads an xml model, puts it in self.model
+        """
+        SingleArmEnv_MG._load_model(self)
+
+        # Adjust base pose accordingly
+        xpos = self.robots[0].robot_model.base_xpos_offset["table"](self.table_full_size[0])
+        self.robots[0].robot_model.set_base_xpos(xpos)
+
+        # load model for table top workspace
+        mujoco_arena = self._load_arena()
+        
+
+        # Arena always gets set to zero origin
+        mujoco_arena.set_origin([0, 0, 0])
+
+        # Add camera with full tabletop perspective
+        self._add_agentview_full_camera(mujoco_arena)
+
+        # initialize objects of interest
+        self.coffee_pod = CoffeeMachinePodObject(name="coffee_pod")
+        self.coffee_machine = CoffeeMachineObject(name="coffee_machine")
+        objects = [self.coffee_pod, self.coffee_machine]
+
+        # Create placement initializer
+        self._get_placement_initializer()
+
+        # task includes arena, robot, and objects of interest
+        self.model = ManipulationTask(
+            mujoco_arena=mujoco_arena,
+            mujoco_robots=[robot.robot_model for robot in self.robots],
+            mujoco_objects=objects,
+        )
+
+    def _get_placement_initializer(self):
+        bounds = self._get_initial_placement_bounds()
+
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        self.placement_initializer.append_sampler(
+            sampler=TiledTableRandomSampler(
+                name="CoffeeMachineSampler",
+                mujoco_objects=self.coffee_machine,
+                x_range=bounds["coffee_machine"]["x"],
+                y_range=bounds["coffee_machine"]["y"],
+                rotation=bounds["coffee_machine"]["z_rot"],
+                rotation_axis='z',
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=bounds["coffee_machine"]["reference"],
+                rotmat=self.get_table_offset_rotmat1
+            )
+        )
+        self.placement_initializer.append_sampler(
+            sampler=TiledTableRandomSampler(
+                name="CoffeePodSampler",
+                mujoco_objects=self.coffee_pod,
+                x_range=bounds["coffee_pod"]["x"],
+                y_range=bounds["coffee_pod"]["y"],
+                rotation=bounds["coffee_pod"]["z_rot"],
+                rotation_axis='z',
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=True,
+                reference_pos=bounds["coffee_pod"]["reference"],
+                rotmat=self.get_table_offset_rotmat2
+            )
+        )
+    
+    
+    def _load_arena(self):
+        """
+        Allow subclasses to easily override arena settings.
+        """
+        self._initial_rand_table_rot1()
+        self._initial_rand_table_rot2()
+
+        # load model for table top workspace
+        # ToDo: currently I cannot restore the table state from training data,
+        #  in future, consider treating the state as a joint
+        self.mujoco_arena = TableArena(
+            table_full_size=self.table_full_size,
+            table_friction=self.table_friction,
+            table_offset=self.table_offset,
+            # table_offset_rot=self.table_offset_rot1,
+        )
+        # Arena always gets set to zero origin
+        self.mujoco_arena.coffee_d4()
+        self.mujoco_arena.set_origin([0, 0, 0])
+
+        # Add camera with full tabletop perspective
+
+        self._add_agentview_full_camera(self.mujoco_arena)
+        
+        return self.mujoco_arena
+
+    def _reset_internal(self):
+        """
+        Resets simulation internal configurations.
+        """
+        super()._reset_internal()
+        # Reset all object positions using initializer sampler if we're not directly loading from an xml
+        if not self.deterministic_reset:
+            self._initial_rand_table_rot1() # this function sampled a tilt quat
+            self._initial_rand_table_rot2() # this function sampled a tilt quat
+
+            # Sample from the placement initializer for all objects
+            object_placements = self.placement_initializer.sample()
+            box_id1 = self.sim.model.body_name2id('box_base')
+            quat1 = self.table_offset_rot1.as_quat()
+            quat1 = np.concatenate([quat1[3:], quat1[:3]])  # wxyz
+            self.sim.model.body_quat[box_id1] = quat1
+            
+            # print(quat1,'quat 1')
+            box_id2 = self.sim.model.body_name2id('box_base2')
+            quat2 = self.table_offset_rot2.as_quat()
+            quat2 = np.concatenate([quat2[3:], quat2[:3]])  # wxyz
+            self.sim.model.body_quat[box_id2] = quat2
+            # print(quat2, 'quat 2')
+
+            # Loop through all objects and reset their positions
+            i = 0
+            for obj_pos, obj_quat, obj in object_placements.values():
+                # print(obj_quat,'==',print(obj.joints[0]))
+                if i ==0:
+                   # coffee machine
+                   obj_pos = np.array(obj_pos) + np.array([0,0,0.0])
+                   self.sim.model.body_pos[box_id2] = obj_pos
+                   self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([obj_pos+ np.array([0,0,0.13]), np.array(obj_quat)]))
+                #    self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([obj_pos+ np.array([0,0,0.15]), quat2]))
+                   
+                else:
+                    # the coffee pod
+                    obj_pos = np.array(obj_pos) + np.array([0,0,0.02])
+                    self.sim.model.body_pos[box_id1] = obj_pos
+                    self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([obj_pos+np.array([0,0,0.025]), quat1]))
+                i = i+1
+                
+
+        # Always reset the hinge joint position
+        self.sim.data.qpos[self.hinge_qpos_addr] = 2. * np.pi / 3.
+        self.sim.forward()
+
+    def get_table_offset_rotmat(self):
+        return self.table_offset_rotmat
 
 
 class CoffeePreparation(Coffee):
