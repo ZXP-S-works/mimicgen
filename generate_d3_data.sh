@@ -16,9 +16,13 @@ done
 
 wait
 
+
+
 #for ((i=0; i<n_runs; i++));
 #do
-#  task = ${tasks[$i]}
-#  echo "Starting pcd generation for ${task}."
-#  python generate_dataset.py --config /tmp/core_configs/demo_src_${task}_task_D3.json --auto-remove-exp 2>&1 & sleep 1s
+#  task=${tasks[$i]}
+#  echo "Starting img voxel pcd generation for ${task}."
+#
+#  cp /tmp/core_datasets/${t}/demo_src_${t}_task_D3/demo.hdf5 data/robomimic/datasets/${t}_d3/${t}_d3.hdf5
+#  python  2>&1 & sleep 1s
 #done
