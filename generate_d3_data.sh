@@ -1,11 +1,11 @@
 #!/usr/bin/bash
 
 tasks=(three_piece_assembly_d3 square_d3 coffee_d3 threading_d3)
-n_runs=${#task[@]}
+n_runs=${#tasks[@]}
 
 cd mimicgen/scripts
 
-python generate_core_configs.py
+#python generate_core_configs.py
 
 for ((i=0; i<n_runs; i++));
 do
