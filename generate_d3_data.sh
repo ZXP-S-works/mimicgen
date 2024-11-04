@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-tasks=(three_piece_assembly square coffee threading)
+tasks=(threading)
 n_runs=${#tasks[@]}
 
 cd mimicgen/scripts

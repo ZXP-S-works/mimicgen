@@ -101,7 +101,7 @@ class MG_Config(Config):
         # settings related to data generation
         self.experiment.generation.path = None                                  # path where new dataset folder will be created
         self.experiment.generation.guarantee = False                            # whether to keep running data collection until we have @num_trials successful trajectories
-        self.experiment.generation.keep_failed = True                           # whether to keep failed trajectories as well
+        self.experiment.generation.keep_failed = False                           # whether to keep failed trajectories as well
         self.experiment.generation.num_trials = 10                              # number of attempts to collect new data
 
         # if True, select a different source demonstration for each subtask during data generation, else 
