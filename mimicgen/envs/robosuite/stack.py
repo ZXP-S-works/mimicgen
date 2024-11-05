@@ -18,7 +18,7 @@ from robosuite.environments.manipulation.stack import Stack
 
 import scipy.spatial.transform as sst
 from mimicgen.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
-from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler, MAX_TILT
+from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler, D3_TILT
 
 
 class Stack_D0(Stack, SingleArmEnv_MG):
@@ -267,7 +267,7 @@ class Stack_D3(Stack_D1):
         Stack.__init__(self, placement_initializer=placement_initializer, **kwargs)
 
     def _initial_rand_table_rot(self):
-        rand_tilt = np.asarray([MAX_TILT / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = np.asarray([D3_TILT / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
         rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
         rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
         rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
