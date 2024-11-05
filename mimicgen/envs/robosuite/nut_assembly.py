@@ -18,7 +18,7 @@ from robosuite.utils import RandomizationError
 
 import scipy.spatial.transform as sst
 from mimicgen.envs.robosuite.single_arm_env_mg import SingleArmEnv_MG
-from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler, MAX_TILT
+from mimicgen.envs.robosuite.tilted_table_sampler import TiledTableRandomSampler, D3_TILT, D4_TILT
 
 
 class NutAssembly_D0(NutAssembly, SingleArmEnv_MG):
@@ -430,7 +430,7 @@ class Square_D3(Square_D2):
         NutAssemblySquare.__init__(self, placement_initializer=placement_initializer, **kwargs)
 
     def _initial_rand_table_rot(self):
-        rand_tilt = np.asarray([MAX_TILT / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = np.asarray([D3_TILT / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
         rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
         rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
         rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
@@ -530,3 +530,12 @@ class Square_D3(Square_D2):
         quat = self.sim.model.body_quat[tableID]
         quat = np.concatenate([quat[1:], quat[:1]])  # xyzw
         return sst.Rotation.from_quat(quat).as_matrix()
+
+class Square_D4(Square_D3):
+    def _initial_rand_table_rot(self):
+        rand_tilt = np.asarray([D4_TILT / 180 * np.pi, 0, 0]) * np.random.uniform(-1, 1, size=3)
+        rand_dir = np.asarray([0, 0, np.pi]) * np.random.uniform(-1, 1, size=3)
+        rand_tilt = sst.Rotation.from_euler('XYZ', rand_tilt).as_matrix()
+        rand_dir = sst.Rotation.from_euler('XYZ', rand_dir).as_matrix()
+        self.table_offset_rotmat = rand_dir @ rand_tilt @ rand_dir.T
+        self.table_offset_rot = sst.Rotation.from_matrix(self.table_offset_rotmat)

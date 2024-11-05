@@ -1,6 +1,7 @@
 from robosuite.utils.placement_samplers import *
 
-MAX_TILT = 30
+D3_TILT = 15
+D4_TILT = 30
 
 class TiledTableRandomSampler(UniformRandomSampler):
     """
