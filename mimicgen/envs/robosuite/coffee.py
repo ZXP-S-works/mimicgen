@@ -970,7 +970,10 @@ class Coffee_D3(Coffee_D2):
         self.sim.forward()
 
     def get_table_offset_rotmat(self):
-        return self.table_offset_rotmat
+        tableID = self.sim.model.body_name2id('table')
+        quat = self.sim.model.body_quat[tableID]
+        quat = np.concatenate([quat[1:], quat[:1]])  # xyzw
+        return sst.Rotation.from_quat(quat).as_matrix()
     
 
 

@@ -645,4 +645,7 @@ class Threading_D3(Threading_D2):
                 self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
 
     def get_table_offset_rotmat(self):
-        return self.table_offset_rotmat
+        tableID = self.sim.model.body_name2id('table')
+        quat = self.sim.model.body_quat[tableID]
+        quat = np.concatenate([quat[1:], quat[:1]])  # xyzw
+        return sst.Rotation.from_quat(quat).as_matrix()
