@@ -32,7 +32,7 @@ CONFIG_DIR = "/tmp/core_configs"
 OUTPUT_FOLDER = "/tmp/core_datasets"
 
 # number of trajectories to generate (or attempt to generate)
-NUM_TRAJ = 100
+NUM_TRAJ = 1000
 
 # whether to guarantee that many successful trajectories (e.g. keep running until that many successes, or stop at that many attempts)
 GUARANTEE = True
